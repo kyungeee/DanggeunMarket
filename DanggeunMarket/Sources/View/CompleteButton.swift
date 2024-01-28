@@ -24,7 +24,7 @@ class CompleteButton: UIView {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         label.textColor = .orange
-        label.text = "2"
+        label.text = "0"
         return label
     }()
     

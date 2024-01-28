@@ -27,20 +27,3 @@ extension UIView {
     }
     
 }
-
-
-// TODO: - refector
-/// Responsible for getting a PHAsset's Image from Photo Library via PHImageManager
-public func getAssetThumbnail(asset: PHAsset, size: CGSize) -> UIImage? {
-    let manager = PHImageManager.default()
-    let options = PHImageRequestOptions()
-    options.isSynchronous = true
-    options.isNetworkAccessAllowed = true
-    
-    var thumbnail: UIImage?
-    manager.requestImage(for: asset, targetSize: size, contentMode: .aspectFill, options: options) {(imageReturned, info) in
-        guard let thumbnailUnwrapped = imageReturned else {return}
-        thumbnail = thumbnailUnwrapped
-    }
-    return thumbnail
-}

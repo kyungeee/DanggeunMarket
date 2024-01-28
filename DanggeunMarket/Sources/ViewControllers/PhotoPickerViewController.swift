@@ -9,35 +9,35 @@ import UIKit
 import Photos
 import PhotosUI
 
+protocol didFinishTakingPhotoDelegate: AnyObject {
+    func didFinishTakingPhoto(_ photo: [UIImage])
+    func didFinishSelectingPhotos(_ photos: [UIImage])
+}
+
 final class PhotoPickerViewController: UIViewController {
-    
-    // Properties
-    var fetchResult: PHFetchResult<PHAsset>!
-    var albums: [PHAssetCollection] = []
-    var selectedAlbum: PHAssetCollection?
-    var photos: PHFetchResult<PHAsset>!
-    
-    
     
     //MARK: - Properties
     
-    fileprivate var allPhotosInCurrentAlbum = PHFetchResult<PHAsset>()
+    private var authService: AuthService
     
-    fileprivate var smartAlbums = [PHAssetCollection]()
+    private var fetchResult: PHFetchResult<PHAsset>!
     
-    fileprivate var userCreatedAlbums = PHFetchResult<PHAssetCollection>()
+    private var allAlbums = [PHAssetCollection]()
     
-    fileprivate var allAlbums = [PHAssetCollection]()
+    private let listOfsmartAlbumSubtypesToBeFetched: [PHAssetCollectionSubtype] = [.smartAlbumUserLibrary, .smartAlbumFavorites]
     
-    fileprivate let listOfsmartAlbumSubtypesToBeFetched: [PHAssetCollectionSubtype] = [.smartAlbumUserLibrary, .smartAlbumFavorites, .smartAlbumScreenshots]
+    private var dataSource = [PhotoCellInfo]()
+    private var selectedPhotos = [PhotoCellInfo]()
+    private var selectedIndexArray = [Int]()
     
+    weak var delegate: didFinishTakingPhotoDelegate?
     
     // MARK: - UI Components
     lazy var collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.register(CameraCell.self, forCellWithReuseIdentifier: CameraCell.cellIdentifier)
-        collectionView.register(ImageCell.self, forCellWithReuseIdentifier: ImageCell.cellIdentifier)
+        collectionView.register(PhotoCell.self, forCellWithReuseIdentifier: PhotoCell.cellIdentifier)
         return collectionView
     }()
     
@@ -70,33 +70,58 @@ final class PhotoPickerViewController: UIViewController {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(editButtonTapped))
         editButton.addGestureRecognizer(tapGesture)
         editButton.isUserInteractionEnabled = true
-        
         return editButton
+    }()
+    
+    lazy var limitView = UIView()
+    lazy var limitTextLabel: UILabel = {
+        let label = UILabel()
+        label.text = "지금 모든 사진 접근 권한을 허용하면 더 쉽고 편하게 사진을 올릴 수 있어요"
+        label.numberOfLines = 2
+        label.font = UIFont.systemFont(ofSize: 13, weight: .light)
+        return label
+    }()
+    
+    lazy var goToSetting: UILabel = {
+        let label = UILabel()
+        label.text = "사진 접근 허용하기"
+        label.font = UIFont.systemFont(ofSize: 13, weight: .light)
+        label.textColor = .systemBlue
+        label.isUserInteractionEnabled = true
+        return label
     }()
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        setup()
-        self.view.backgroundColor = .blue
+        self.view.backgroundColor = .white
         
         collectionView.dataSource = self
         collectionView.delegate = self
         
         tableView.dataSource = self
         tableView.delegate = self
-        
-        self.tableView.backgroundColor = .yellow
-        
-        // 사진 라이브러리 권한 요청 및 데이터 로딩
-        PHPhotoLibrary.requestAuthorization { status in
-            if status == .authorized {
-                self.loadPhotosFromLibrary()
-//                self.loadAlbums()
-            } else {
-                // 권한 거부 처리
-            }
+
+        if authService.isPhotoLimitAuth() {
+            self.limitView.isHidden = false
+        } else {
+            self.limitView.isHidden = true
         }
+        
+        setup()
+        loadPhotosFromLibrary()
+        
     }
+    
+    init(authService: AuthService) {
+        self.authService = authService
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    
 }
 
 
@@ -123,20 +148,23 @@ extension PhotoPickerViewController {
             self.allAlbums.append(collection)
         }
         
-        print(allAlbums)
-        
         DispatchQueue.main.async {
-            //            self.mediaPickerView.bindDataFromPhotosLibrary(fetchedAssets: self.allPhotosInCurrentAlbum, albumTitle: "Recents")
             self.tableView.reloadData()
         }
-
         
         let fetchOptions = PHFetchOptions()
-        let sortDescriptor = NSSortDescriptor(key: "creationDate", ascending: false)
+        let sortDescriptor = NSSortDescriptor(key: "creationDate", ascending: true)
         fetchOptions.sortDescriptors = [sortDescriptor]
         fetchResult = PHAsset.fetchAssets(with: fetchOptions)
+        
+        fetchResult.enumerateObjects { (asset, _, _) in
+            let image = self.getAssetThumbnail(asset: asset, size: PHImageManagerMaximumSize)
+            let photoInfo = PhotoCellInfo(phAsset: asset, image: image, selectedOrder: .none)
+            
+            self.dataSource.append(photoInfo)
+        }
+        
         DispatchQueue.main.async {
-            //            self.mediaPickerView.bindDataFromPhotosLibrary(fetchedAssets: self.allPhotosInCurrentAlbum, albumTitle: "Recents")
             self.collectionView.reloadData()
         }
     }
@@ -144,12 +172,28 @@ extension PhotoPickerViewController {
     // MARK: 선택한 앨범 사진 asset 가져오기
     func handleDidSelect(album: PHAssetCollection) {
         let fetchOptions = PHFetchOptions()
-        let sortDescriptor = NSSortDescriptor(key: "creationDate", ascending: false)
+        let sortDescriptor = NSSortDescriptor(key: "creationDate", ascending: true)
         fetchOptions.sortDescriptors = [sortDescriptor]
+        
         let fetchedAssets = PHAsset.fetchAssets(in: album, options: fetchOptions)
         fetchResult = fetchedAssets
         
-        self.bindDataFromPhotosLibrary(fetchedAssets: self.allPhotosInCurrentAlbum, albumTitle: album.localizedTitle ?? "")
+        dataSource = []
+        selectedIndexArray = []
+        
+        fetchResult.enumerateObjects { (asset, index, _) in
+            var photoInfo: PhotoCellInfo
+            if let info = self.selectedPhotos.first(where: { $0.phAsset == asset }) {
+                photoInfo = PhotoCellInfo(phAsset: info.phAsset, image: info.image, selectedOrder: info.selectedOrder)
+                self.selectedIndexArray.append(index + 1)
+            } else {
+                photoInfo = PhotoCellInfo(phAsset: asset, image: nil, selectedOrder: .none)
+            }
+            
+            self.dataSource.append(photoInfo)
+        }
+    
+        self.bindDataFromPhotosLibrary(fetchedAssets: self.fetchResult, albumTitle: album.localizedTitle ?? "")
         self.tableView.isHidden = !self.tableView.isHidden
         
     }
@@ -177,7 +221,22 @@ extension PhotoPickerViewController {
         let albumTitle = navigationTitleButton.titleLabel.text ?? ""
         return albumTitle
     }
-       
+    
+    // MARK: - asset 데이터로 부터 이미지 가져오기
+    public func getAssetThumbnail(asset: PHAsset, size: CGSize) -> UIImage? {
+        let manager = PHImageManager.default()
+        let options = PHImageRequestOptions()
+        options.isSynchronous = true
+        options.isNetworkAccessAllowed = true
+        
+        var thumbnail: UIImage?
+        manager.requestImage(for: asset, targetSize: size, contentMode: .aspectFill, options: options) {(imageReturned, info) in
+            guard let thumbnailUnwrapped = imageReturned else {return}
+            thumbnail = thumbnailUnwrapped
+        }
+        return thumbnail
+    }
+    
 }
 
 extension PhotoPickerViewController: UITableViewDelegate, UITableViewDataSource {
@@ -189,12 +248,13 @@ extension PhotoPickerViewController: UITableViewDelegate, UITableViewDataSource 
     
     func dequeAlbumCell(for indexPath: IndexPath) -> UITableViewCell {
         let albumCell = tableView.dequeueReusableCell(withIdentifier: AlbumCell.cellIdentifier, for: indexPath) as! AlbumCell
+        
         albumCell.backgroundColor = .clear
         albumCell.selectionStyle = .none
         
-        // cell data binding
         var coverAsset: PHAsset?
         let aUserCreatedAlbum = allAlbums[indexPath.item]
+        
         let fetchOptions = PHFetchOptions()
         fetchOptions.fetchLimit = 1
         let sortDescriptor = NSSortDescriptor(key: "creationDate", ascending: false)
@@ -204,7 +264,7 @@ extension PhotoPickerViewController: UITableViewDelegate, UITableViewDataSource 
         coverAsset = fetchedAssets.firstObject
         guard let asset = coverAsset else { return albumCell }
         
-        let coverImage = getAssetThumbnail(asset: asset, size: albumCell.bounds.size)
+        let coverImage = getAssetThumbnail(asset: asset, size: PHImageManagerMaximumSize)
         albumCell.bindData(albumTitle: aUserCreatedAlbum.localizedTitle ?? "", albumCoverImage: coverImage)
     
         return albumCell
@@ -222,7 +282,6 @@ extension PhotoPickerViewController: UITableViewDelegate, UITableViewDataSource 
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         handleDidSelect(album: allAlbums[indexPath.row])
-//        dismiss(animated: true)
     }
     
 }
@@ -236,21 +295,22 @@ extension PhotoPickerViewController: UICollectionViewDataSource, UICollectionVie
     }
     
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        return fetchResult?.count ?? 0
+        return  dataSource.count + 1
     }
     
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        
         if indexPath.item == 0 {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: CameraCell.cellIdentifier, for: indexPath) as! CameraCell
             return cell
         } else {
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ImageCell.cellIdentifier, for: indexPath) as! ImageCell
-            let asset = fetchResult.object(at: indexPath.item)
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PhotoCell.cellIdentifier, for: indexPath) as! PhotoCell
+            let imageInfo = dataSource[indexPath.item - 1]
+            let phAsset = imageInfo.phAsset
+            let imageSize = cell.bounds.size
+            let photo = getAssetThumbnail(asset: phAsset, size: imageSize)
             
-            // PHCachingImageManager를 사용하여 섬네일 이미지 로드
-            PHCachingImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 50, height: 50), contentMode: .aspectFill, options: nil) { image, _ in
-                cell.imageView.image = image
-            }
+            cell.prepare(info: .init(phAsset: phAsset, image: photo, selectedOrder: imageInfo.selectedOrder))
             
             return cell
         }
@@ -270,26 +330,59 @@ extension PhotoPickerViewController: UICollectionViewDataSource, UICollectionVie
         return 10
     }
     
-    
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width = collectionView.frame.width / 3 - 15
+        let width = collectionView.frame.width / 3 - 14
         let size = CGSize(width: width, height: width)
         return size
     }
     
-    func handleCameraCellSelection() {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        var updateIdx = [indexPath]
         
-        // 카메라 접근 허용
-        // 접근 o -> 카메라뷰로 넘어가게
-        // 접근 x -> 알랏 보여주고 설정페이지
-        print("Special cell at index 0 selected!")
+        if indexPath.item == 0 {
+            // CameraCell 선택 시 로직
+            showCameraView()
+        } else {
+            // PhotoCell 선택 시 로직
+            let info = dataSource[indexPath.item - 1]
+            if case .selected = info.selectedOrder {
+                dataSource[indexPath.item - 1] = .init(phAsset: info.phAsset, image: info.image, selectedOrder: .none)
+                selectedIndexArray.removeAll { $0 == indexPath.item }
+                selectedPhotos.removeAll { $0.phAsset == info.phAsset }
+                
+                selectedPhotos
+                    .enumerated()
+                    .forEach { index, info in
+                        selectedPhotos[index].selectedOrder = .selected(index + 1)
+                    }
+                
+                selectedIndexArray
+                    .forEach { idx in
+                        let preInfo = dataSource[idx - 1]
+                        if let currentInfo = selectedPhotos.first(where: { $0.phAsset == preInfo.phAsset }) {
+                            dataSource[idx - 1] = .init(phAsset: preInfo.phAsset, image: preInfo.image, selectedOrder: currentInfo.selectedOrder)
+                        }
+                        updateIdx.append(IndexPath(row: idx, section: 0))
+                    }
+                
+            } else {
+                let newInfo = PhotoCellInfo(phAsset: info.phAsset, image: info.image, selectedOrder: .selected(selectedIndexArray.count + 1))
+                dataSource[indexPath.item - 1] = newInfo
+                selectedPhotos.append(newInfo)
+                selectedIndexArray.append(indexPath.item)
+            }
+            
+            update(indexPaths: updateIdx)
+        }
+        
+        func update(indexPaths: [IndexPath]) {
+            self.compeleteButton.numberLabel.text = "\(selectedPhotos.count)"
+            collectionView.performBatchUpdates {
+                collectionView.reloadItems(at: indexPaths)
+            }
+        }
     }
     
-    func handleImageCellSelection(at indexPath: IndexPath) {
-        
-        // ImageCell isSelected 처리
-        print("Regular cell at index \(indexPath.item) selected!")
-    }
 }
 
 
@@ -304,8 +397,9 @@ extension PhotoPickerViewController {
     }
     
     func setNavigationBar() {
-        navigationTitleButton.backgroundColor = .yellow
+        navigationTitleButton.backgroundColor = .white
         compeleteButton.backgroundColor = .white
+        self.navigationController?.navigationBar.barTintColor = .black
         self.navigationItem.titleView = navigationTitleButton
         self.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: dismissButton)
         self.navigationItem.rightBarButtonItem = UIBarButtonItem(customView: compeleteButton)
@@ -320,20 +414,56 @@ extension PhotoPickerViewController {
     
     // MARK: - Layout Setup
     private func setLayout() {
-        view.addSubviews(collectionView, tableView, bottomToolbar)
-        
-        // ToolBar Constraints
+        setBottomToolBar()
+        setBottomToolBarSubviews()
+        setlimitView()
+        setCollectionview()
+        setTableView()
+    }
+    
+    func setCollectionview() {
+        self.view.addSubviews(collectionView)
+        if limitView.isHidden == false {
+            NSLayoutConstraint.activate([
+                collectionView.topAnchor.constraint(equalTo: limitView.bottomAnchor),
+                collectionView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+                collectionView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+                collectionView.bottomAnchor.constraint(equalTo: bottomToolbar.topAnchor),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                collectionView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+                collectionView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+                collectionView.bottomAnchor.constraint(equalTo: bottomToolbar.topAnchor)
+            ])
+        }
+    }
+    
+    func setlimitView() {
+        self.view.addSubviews(limitView)
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: bottomToolbar.topAnchor),
-            
+            limitView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            limitView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            limitView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            limitView.heightAnchor.constraint(equalToConstant: 60)
+        ])
+    }
+    
+    func setTableView() {
+        self.view.addSubviews(tableView)
+        NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-            
+            tableView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor)
+        ])
+    }
+    
+    
+    func setBottomToolBar() {
+        self.view.addSubviews(bottomToolbar)
+        NSLayoutConstraint.activate([
             editButton.widthAnchor.constraint(equalToConstant: 100),
             editButton.heightAnchor.constraint(equalToConstant: 40),
             bottomToolbar.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
@@ -342,30 +472,92 @@ extension PhotoPickerViewController {
         ])
     }
     
+    func setBottomToolBarSubviews() {
+        self.limitView.backgroundColor = .placeholderText
+        self.limitView.addSubviews(limitTextLabel, goToSetting)
+        NSLayoutConstraint.activate([
+            limitTextLabel.leadingAnchor.constraint(equalTo: limitView.leadingAnchor, constant: 10),
+            limitTextLabel.trailingAnchor.constraint(equalTo: limitView.trailingAnchor, constant: 10),
+            limitTextLabel.topAnchor.constraint(equalTo: limitView.topAnchor, constant: 13),
+            goToSetting.topAnchor.constraint(equalTo: limitTextLabel.bottomAnchor, constant: 3),
+            goToSetting.leadingAnchor.constraint(equalTo: limitView.leadingAnchor, constant: 10),
+            goToSetting.trailingAnchor.constraint(equalTo: limitView.trailingAnchor, constant: 10)
+        ])
+    }
+    
     private func setGestureRecognizer() {
+        let dismissTapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissModal))
         let titleTapGesture = UITapGestureRecognizer(target: self, action: #selector(toggleTableView))
-        let completeTapGesture = UITapGestureRecognizer()
+        let completeTapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissModal))
+        let editTapGesture = UITapGestureRecognizer(target: self, action: #selector(pushThirdViewController))
+        let openSettingGesture = UITapGestureRecognizer(target: self, action: #selector(authSettingOpen))
+        self.dismissButton.addGestureRecognizer(dismissTapGesture)
         self.navigationTitleButton.addGestureRecognizer(titleTapGesture)
         self.compeleteButton.addGestureRecognizer(completeTapGesture)
+        self.editButton.addGestureRecognizer(editTapGesture)
+        self.goToSetting.addGestureRecognizer(openSettingGesture)
     }
     
 }
 
+extension PhotoPickerViewController: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    
+    func showCameraView() {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+    
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true, completion: nil)
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        
+        picker.dismiss(animated: true, completion: nil)
+        
+        guard let image = info[UIImagePickerController.InfoKey.originalImage] as? UIImage else {
+            return
+        }
+        
+        delegate?.didFinishTakingPhoto([image])
+        self.dismiss(animated: true, completion: nil)
+    }
+}
+
+
 extension PhotoPickerViewController {
     // MARK: - Actions
-    
     @objc func toggleTableView() {
         // 테이블 뷰 보이기/숨기기
         UIView.animate(withDuration: 0.5, animations: {
+            self.handleAnimateArrow(toIdentity: false)
             self.tableView.isHidden = !self.tableView.isHidden
         })
-        
     }
     
     @objc func editButtonTapped() {
-        print("편집 버튼이 눌렸습니다.")
+        
     }
     
+    @objc func authSettingOpen() {
+        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(settingsURL)
+        }
+    }
+    
+    @objc func pushThirdViewController() {
+        let selectedPhotos = self.selectedPhotos
+        let editVC = EditViewController(selectedPhotos: selectedPhotos)
+        self.navigationController?.pushViewController(editVC, animated: true)
+    }
+    
+    @objc func dismissModal() {
+        let selectedPhotos = self.selectedPhotos.compactMap { $0.image }
+        delegate?.didFinishSelectingPhotos(selectedPhotos)
+        self.dismiss(animated: true, completion: nil)
+    }
     
 }
 
