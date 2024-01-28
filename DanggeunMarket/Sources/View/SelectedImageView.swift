@@ -10,7 +10,6 @@ import UIKit
 class SelectedImageView: UIView {
     
     // MARK: - UI Components
-    
     lazy var imageView: UIImageView = {
         let imageView = UIImageView()
         imageView.layer.cornerRadius = 5

@@ -10,8 +10,6 @@ import UIKit
 
 class ImageScrollView: UIView {
     
-    var testDataSource: [String] = ["beer", "books", "coffee", "cook", "dessert", "drive", "exercise", "food", "friends"]
-    
     // UI Components
     lazy var scrollView: UIScrollView = {
         let scrollView = UIScrollView()
@@ -27,23 +25,18 @@ class ImageScrollView: UIView {
     required override init(frame: CGRect) {
         super.init(frame: frame)
         setLayout()
-        udpateUI(images: self.testDataSource)
+        udpateUI(images: [])
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setLayout()
-        udpateUI(images: self.testDataSource)
+        udpateUI(images: [])
     }
     
 }
 
 extension ImageScrollView {
-    
-    private func setImageScrollView() {
-        setLayout()
-        
-    }
     
     // Update UI
     private func setLayout() {
@@ -70,9 +63,9 @@ extension ImageScrollView {
         
     }
     
-    private func udpateUI(images: [String]) {
+    func udpateUI(images: [UIImage]) {
         for (index, item) in images.enumerated() {
-            let image: UIImage = UIImage(named: item)!
+            let image: UIImage = item
             stackView.addArrangedSubviews(createImageView(index: index, item: image))
         }
     }
