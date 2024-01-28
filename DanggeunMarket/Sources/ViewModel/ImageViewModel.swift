@@ -9,19 +9,29 @@ import UIKit
 import Photos
 import PhotosUI
 
-class ImageViewModel {
+class PhotoPickerViewModel {
     
-    // TODO: - 다중선택 이미지 프로퍼티 추가
-    // FIXME: - refectoring
+    // Properties
+    private var albums: [PHAssetCollection] = []
+    private var photos: [PhotoCellInfo] = []
+    private var selectedPhotos: [PhotoCellInfo] = []
     
-    //MARK: - Properties
-    fileprivate var allPhotosInCurrentAlbum = PHFetchResult<PHAsset>()
+    func fetchAlbums() {
+        
+    }
     
-    fileprivate var smartAlbums = [PHAssetCollection]()
+    func fetchPhotos(from album: PHAssetCollection) {
+        
+    }
+
     
-    fileprivate var userCreatedAlbums = PHFetchResult<PHAssetCollection>()
-    
-    fileprivate let listOfsmartAlbumSubtypesToBeFetched: [PHAssetCollectionSubtype] = [.smartAlbumUserLibrary, .smartAlbumFavorites, .smartAlbumVideos, .smartAlbumScreenshots]
-    
+    var numberOfPhotos: Int {
+        return photos.count
+    }
+
+    func photoInfo(at index: Int) -> PhotoCellInfo {
+        return photos[index]
+    }
+
     
 }
