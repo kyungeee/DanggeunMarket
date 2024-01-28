@@ -21,7 +21,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = (scene as? UIWindowScene) else { return }
         let window = UIWindow(windowScene: windowScene)
         
-        let vc = PhotoPickerViewController()
+        let authService = AuthService()
+        let vc = ViewController(authService: authService)
         let nav = UINavigationController(rootViewController: vc)
         
         window.rootViewController = nav
