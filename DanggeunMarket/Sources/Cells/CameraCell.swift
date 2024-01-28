@@ -22,7 +22,9 @@ class CameraCell: UICollectionViewCell {
     
     lazy var cameraImage: UIImageView = {
         let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "camera")
+        if let image = UIImage(systemName: "camera.fill")?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+            imageView.image = image
+        }
         return imageView
     }()
     
@@ -52,7 +54,9 @@ extension CameraCell {
         
         NSLayoutConstraint.activate([
             cameraImage.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            cameraImage.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+            cameraImage.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            cameraImage.heightAnchor.constraint(equalToConstant: 30),
+            cameraImage.widthAnchor.constraint(equalToConstant: 40)
         ])
     }
     

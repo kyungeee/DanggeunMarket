@@ -37,7 +37,7 @@ class AlbumCell: UITableViewCell {
     
     lazy var albumTitleLabel: UILabel = {
         let label = UILabel()
-        label.textColor = .white
+        label.textColor = .black
         label.font = UIFont.systemFont(ofSize: 25, weight: .semibold)
         return label
     }()
@@ -47,7 +47,7 @@ class AlbumCell: UITableViewCell {
     fileprivate func setUpViews() {
         backgroundColor = .clear
         selectionStyle = .none
-        self.contentView.backgroundColor = .black
+        self.contentView.backgroundColor = .white
         self.contentView.addSubviews(albumCoverImageView, albumTitleLabel)
         
         NSLayoutConstraint.activate([
