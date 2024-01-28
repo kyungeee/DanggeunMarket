@@ -22,7 +22,7 @@ class EditButtonView: UIView {
     
     private lazy var editImageView: UIImageView = {
         let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "pencil")
+        imageView.image = UIImage(systemName: "pencil")?.withTintColor(.black, renderingMode: .alwaysOriginal)
         imageView.contentMode = .scaleAspectFit
         return imageView
     }()
@@ -31,6 +31,7 @@ class EditButtonView: UIView {
         let label = UILabel()
         label.text = "편집"
         label.font = UIFont.systemFont(ofSize: 16)
+        label.textColor = .black
         return label
     }()
     
